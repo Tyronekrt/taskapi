@@ -9,7 +9,11 @@ from .serializers import TaskSerializer
 from django.http import Http404
 from rest_framework.views import APIView
 
+from rest_framework import viewsets
 
+from rest_framework import mixins
+
+from rest_framework.decorators import action
 @api_view(['GET', 'POST'])
 def task_list(request):
     if request.method == 'GET':
@@ -98,3 +102,55 @@ class TaskListCreateView(generics.ListCreateAPIView):
     def perform_create(self, serializer):
         # Runs after validation; a place to inject extra data
         serializer.save()    
+        
+class TaskViewSet(viewsets.ModelViewSet):
+    serializer_class = TaskSerializer
+
+    def get_queryset(self):
+        queryset = Task.objects.all()
+        params = self.request.query_params
+
+        completed = params.get('completed')
+        if completed is not None:
+            queryset = queryset.filter(is_completed=completed.lower() == 'true')
+
+        priority = params.get('priority')
+        if priority:
+            queryset = queryset.filter(priority=priority)
+
+        search = params.get('search')
+        if search:
+            queryset = queryset.filter(title__icontains=search)
+
+        return queryset
+    
+    @action(detail=True, methods=['post'])
+    def complete(self, request, pk=None):
+        task = self.get_object()
+        task.is_completed = True
+        task.save()
+        return Response(self.get_serializer(task).data)
+
+    @action(detail=False, methods=['get'])
+    def stats(self, request):
+        qs = self.get_queryset()
+        total = qs.count()
+        completed = qs.filter(is_completed=True).count()
+        return Response({
+            "total": total,
+            "completed": completed,
+            "pending": total - completed,
+        })
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return TaskListSerializer
+        return TaskSerializer
+class TaskReadOnlyViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Task.objects.all()
+    serializer_class = TaskSerializer
+class TaskViewSet(mixins.ListModelMixin,
+                  mixins.CreateModelMixin,
+                  mixins.RetrieveModelMixin,
+                  viewsets.GenericViewSet):
+    queryset = Task.objects.all()
+    serializer_class = TaskSerializer
